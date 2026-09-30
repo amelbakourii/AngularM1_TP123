@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { Track } from '../../shared/models/track.model';
 import { TrackService } from '../../shared/services/track.service';
@@ -21,6 +21,11 @@ export class TracksPageComponent {
 
   constructor() {
     this.load();
+    // Libère l'audio téléchargé quand on quitte la page (ex. après une déconnexion).
+    inject(DestroyRef).onDestroy(() => {
+      const url = this.audioUrl();
+      if (url) URL.revokeObjectURL(url);
+    });
   }
 
   choose(event: Event): void {

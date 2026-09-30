@@ -27,22 +27,38 @@ export class AuthService {
   profile() {
     return this.http
       .get<User>('/api/users/me')
-      .pipe(tap((user) => this.currentUser.set(user)));
+      .pipe(tap((user) => this.setCurrentUserIfAuthenticated(user)));
   }
 
   update(name: string) {
     return this.http
       .put<User>('/api/users/me', { name })
-      .pipe(tap((user) => this.currentUser.set(user)));
+      .pipe(tap((user) => this.setCurrentUserIfAuthenticated(user)));
   }
 
   logout(): void {
     localStorage.removeItem('gpc_token');
     this.token.set(null);
     this.currentUser.set(null);
+    // Jamais le token dans les logs : on trace seulement l'événement.
+    console.debug('[AuthService] Session locale supprimée');
+  }
+
+  /**
+   * Ignore une réponse de profil arrivée après une déconnexion,
+   * pour ne pas remettre l'ancien utilisateur dans currentUser.
+   */
+  private setCurrentUserIfAuthenticated(user: User): void {
+    if (this.token()) {
+      this.currentUser.set(user);
+    }
   }
 
   private storeAuthentication(response: AuthResponse): void {
+    // Refuse une réponse incomplète plutôt que de stocker un token "undefined".
+    if (typeof response?.token !== 'string' || !response.token || !response.user) {
+      throw new Error('Réponse d’authentification inattendue');
+    }
     localStorage.setItem('gpc_token', response.token);
     this.token.set(response.token);
     this.currentUser.set(response.user);

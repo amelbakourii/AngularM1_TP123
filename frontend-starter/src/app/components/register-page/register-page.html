@@ -1,13 +1,61 @@
 <section class="card">
   <h1>Créer un compte</h1>
-  <form [formGroup]="form" (ngSubmit)="submit()">
-    <label>Nom<input formControlName="name" /></label>
-    <label>Email<input type="email" formControlName="email" /></label>
-    <label>Mot de passe<input type="password" formControlName="password" /></label>
-    <button type="submit">Créer mon compte</button>
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <label>Nom
+      <input
+        formControlName="name"
+        autocomplete="name"
+        [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
+      />
+    </label>
+    @if (hasError('name', 'required')) { <small class="error">Le nom est obligatoire.</small> }
+    @if (hasError('name', 'blank')) { <small class="error">Le nom ne peut pas contenir uniquement des espaces.</small> }
+    @if (hasError('name', 'minlength')) { <small class="error">2 caractères minimum.</small> }
+
+    <label>Email
+      <input
+        type="email"
+        formControlName="email"
+        autocomplete="email"
+        [attr.aria-invalid]="form.controls.email.touched && form.controls.email.invalid"
+      />
+    </label>
+    @if (hasError('email', 'required')) { <small class="error">L’email est obligatoire.</small> }
+    @if (hasError('email', 'email')) { <small class="error">Format d’email invalide.</small> }
+    @if (hasError('email', 'emailTaken')) { <small class="error">Cet email est déjà utilisé : <a routerLink="/login">se connecter</a> ?</small> }
+
+    <label>Mot de passe
+      <input
+        type="password"
+        formControlName="password"
+        autocomplete="new-password"
+        [attr.aria-invalid]="form.controls.password.touched && form.controls.password.invalid"
+      />
+    </label>
+    @if (hasError('password', 'required')) { <small class="error">Le mot de passe est obligatoire.</small> }
+    @if (hasError('password', 'minlength')) {
+      <small class="error">8 caractères minimum ({{ form.controls.password.value.length }}/8).</small>
+    }
+
+    <label>Confirmer le mot de passe
+      <input
+        type="password"
+        formControlName="confirmPassword"
+        autocomplete="new-password"
+        [attr.aria-invalid]="form.controls.confirmPassword.touched && (form.controls.confirmPassword.invalid || form.hasError('passwordMismatch'))"
+      />
+    </label>
+    @if (hasError('confirmPassword', 'required')) { <small class="error">Merci de confirmer le mot de passe.</small> }
+    @if (form.controls.confirmPassword.touched && form.hasError('passwordMismatch')) {
+      <small class="error">Les mots de passe ne correspondent pas.</small>
+    }
+
+    <button type="submit" [disabled]="loading()">
+      {{ loading() ? 'Création…' : 'Créer mon compte' }}
+    </button>
   </form>
   @if (error()) {
-    <p class="error">{{ error() }}</p>
+    <p class="error" role="alert">{{ error() }}</p>
   }
   <p><a routerLink="/login">Déjà inscrit ?</a></p>
 </section>
