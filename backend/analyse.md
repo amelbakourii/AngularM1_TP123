@@ -874,3 +874,318 @@ Ce schéma suit un clic sur « Se connecter », du formulaire Angular jusqu'à M
 | Durée de vie | Perdu au rechargement de la page | Conservé après un rechargement ou une fermeture de l'onglet |
 | Réactivité | Le header, le guard et les templates se mettent à jour automatiquement | Aucune : il faut le relire explicitement |
 | Rôle ici | État courant utilisé par l'interface | Permet de retrouver le token au démarrage de l'application (le signal `token` est initialisé à partir de lui) |
+
+---
+
+# TP2
+
+Toutes les modifications du TP2 sont côté frontend. Le backend, `TrackService` et `API_CONTRACT.md` n'ont pas été modifiés.
+
+## TP2 Mission 2 — Bibliothèque paginée
+
+### Existant vérifié avant modification
+
+- **Backend** (`app.js:271-316`) : `GET /api/tracks` est protégé par `auth`. `page` vaut au minimum 1. `limit` est borné entre 1 et 20 (5 par défaut). Le découpage est fait par MongoDB (`sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit)`), en parallèle d'un `countDocuments` grâce à `Promise.all`. La réponse contient `{ items, page, limit, total, pages }`, avec `pages` qui vaut toujours au moins 1. `storedName` n'est jamais renvoyé (`.select("-storedName")`).
+- **`TrackService.list(page = 1, limit = 5)`** transmet déjà `page` et `limit` en paramètres de requête (`params: { page, limit }`). **Non modifié.**
+- **`tracks-page`** avait déjà les signals `tracks`, `page`, `pages` et `loading`, le `@for` avec `@empty`, et des boutons « Préc. » et « Suiv. ».
+- **Manques** :
+  - pas de signal d'erreur, les erreurs n'apparaissaient que dans la console ;
+  - « Chargement… » et « Aucune piste. » s'affichaient en même temps ;
+  - `go()` ne vérifiait pas les bornes ;
+  - les boutons restaient actifs pendant le chargement ;
+  - la borne `page() === pages()` était fragile.
+
+### Fichiers modifiés
+
+| Fichier | Nature du changement |
+|---|---|
+| `frontend-starter/src/app/components/tracks-page/tracks-page.ts` | Signal `error`, garde dans `go()`, liste vidée en cas d'erreur, retour à la dernière page existante |
+| `frontend-starter/src/app/components/tracks-page/tracks-page.html` | `@if (loading()) … @else { @for … @empty }`, message d'erreur, libellés « Précédent » / « Suivant », boutons désactivés aux bornes et pendant le chargement |
+| `frontend-starter/src/app/shared/services/track.service.ts` | 0 : déjà conforme |
+
+### Ajouts et modifications
+
+- **`error`** (`string | null`) :
+  - remis à `null` au début de `load()` ;
+  - renseigné dans le callback `error` ;
+  - affiché avec `role="alert"`.
+
+  En cas d'erreur, `tracks` est vidé : on ne garde pas les pistes de l'ancienne page sous le numéro de la nouvelle.
+- **`go(page)`** ignore les pages hors de `[1, pages()]`. La règle est dans le composant, pas seulement dans le `[disabled]` du template.
+- **Boutons** :
+  - `[disabled]="loading() || page() <= 1"` et `loading() || page() >= pages()` ;
+  - pendant une requête, aucun autre clic n'est possible, donc pas de réponses reçues dans le désordre.
+- **Retour à la dernière page existante** : si `page()` dépasse le `pages` renvoyé par le serveur (pistes supprimées entre-temps), `load()` passe sur `pages` et recharge. Ajouté lors de la relecture finale (voir « TP2 — Corrections après relecture »).
+
+### Flux : clic sur « Suivant »
+
+```text
+ clic « Suivant »
+   └─► go(page() + 1) ── hors bornes ? ──► rien
+          └─► page.set(n) ─► load()
+                 ├─ loading.set(true), error.set(null)
+                 └─► TrackService.list(n)                       (limit = 5)
+                       └─► HttpClient.get('/api/tracks', { params: { page: n, limit: 5 } })
+                             └─► authInterceptor (+ Authorization: Bearer …) ─► proxy ─► :3000
+                                   └─► auth ─► Track.find({ ownerId }).skip((n-1)*5).limit(5)
+                                              + Track.countDocuments({ ownerId })   ──► MongoDB
+                 ◄── 200 { items, page, limit, total, pages }
+                 ├─ page() > pages ? ─► page.set(pages) ─► load()
+                 └─ tracks.set(items), pages.set(pages), loading.set(false) ─► @for affiche les cards
+```
+
+Chaque changement de page déclenche **une nouvelle requête HTTP** avec un `page` différent. Angular ne reçoit jamais plus de `limit` pistes et ne découpe rien lui-même.
+
+### Cas d'erreur pris en charge
+
+| Cas | Où c'est détecté | Ce que voit l'utilisateur |
+|---|---|---|
+| Page hors bornes | `go()` et `[disabled]` | Bouton grisé, aucune requête |
+| Double clic pendant le chargement | Signal `loading` | Boutons grisés |
+| Token invalide ou expiré (401) | `authInterceptor` (TP1) | Session nettoyée, retour à `/login` |
+| Backend éteint ou erreur serveur | Callback `error` de `load()` | « Impossible de charger les pistes. », liste vidée, sans « Aucune piste. » |
+| Page devenue vide après des suppressions | `load()` compare `page()` et `pages` | La dernière page existante s'affiche |
+| Aucune piste | `@empty` | « Aucune piste. » |
+
+### Vérification
+
+- `npm run build` passe sans erreur.
+- **Network** :
+  - à l'arrivée : `GET /api/tracks?page=1&limit=5` ;
+  - un clic sur « Suivant » donne une **nouvelle** ligne `?page=2&limit=5`.
+
+### Limite connue
+
+`response.page` (la page renvoyée par le serveur) n'est pas réutilisé : le composant fait confiance à son propre signal `page`. `upload()` peut aussi appeler `load()` alors qu'un chargement est en cours. Le risque est faible et n'a pas été traité.
+
+## TP2 Mission 3 — Cartographie de l'upload et de la lecture
+
+### Où se trouve chaque étape
+
+| Étape | Fichier | Méthode / ligne |
+|---|---|---|
+| Choix du fichier | `tracks-page.html` / `tracks-page.ts` | `<input #fileInput type="file" (change)="choose($event)">` puis `choose()` (l. 58) |
+| Construction du `FormData` | `track.service.ts` | `upload()` : `append('audio', file)`, `append('title', title)` |
+| Appel HTTP d'upload | `track.service.ts` | `http.post<Track>('/api/tracks', body)` |
+| Ajout du JWT | `auth.interceptor.ts` (l. 19), enregistré dans `main.ts` (l. 11) | `request.clone({ setHeaders: { Authorization: 'Bearer …' } })` |
+| Récupération du `Blob` | `track.service.ts` | `audio(id)` : `http.get(…, { responseType: 'blob' })` |
+| Création de l'`ObjectURL` | `tracks-page.ts` | `play()` : `URL.createObjectURL(blob)` (l. 153) |
+| Affectation au lecteur | `tracks-page.html` | `<audio [src]="audioUrl()">` |
+| Révocation de l'ancienne URL | `tracks-page.ts` | `play()` : `URL.revokeObjectURL(previousUrl)` (l. 152) |
+| Révocation de la dernière URL | `tracks-page.ts` | `destroyRef.onDestroy(…)` (l. 52-55) |
+
+### Schéma annoté : upload
+
+```text
+ NAVIGATEUR (Angular)                                       SERVEUR (Express)
+ ──────────────────────────────────────────                 ─────────────────────────────────────────────
+ <input type="file"> ─① choose()
+     type vide / non accepté / > 25 Mo ? ─► message, champ vidé, AUCUNE requête
+     sinon file.set(fichier)
+ [Envoyer] ─② upload()   (uploading = true, bouton « Envoi… » grisé)
+     └─► TrackService.upload(file, titre.trim() || file.name)
+           └─③ FormData { audio: <binaire>, title: "…" }
+                 └─► HttpClient.post('/api/tracks')
+                       └─④ authInterceptor (+ Bearer)
+                             ═══ POST multipart/form-data ═══►  ⑤ auth : jwt.verify ─► 401 si invalide
+                                                                 ⑥ upload.single("audio") (Multer)
+                                                                    fileFilter : mimetype ∈ allowed ?
+                                                                    limits.fileSize ≤ 25 Mo ?
+                                                                    ─► sinon erreur ─► 400 { message }
+                                                                    ─► sinon fichier écrit sur le disque
+                                                                       data/uploads/<nom aléatoire>
+                                                                 ⑦ pas de req.file ─► 400 « Fichier audio requis »
+                                                                 ⑧ Track.create({ ownerId, title, … }) ──► MongoDB
+                             ◄══ 201 Track ═══════════════════  (sans storedName)
+     ⑨ succès : message, titre et champ fichier vidés, page.set(1), load()
+        erreur : error.error.message affiché (ex. « Format audio non accepté »)
+```
+
+### Schéma annoté : lecture authentifiée
+
+```text
+ [▶ Lire] ─① play(track)   (audioLoading = true, boutons ▶ grisés)
+     └─► TrackService.audio(id)
+           └─► HttpClient.get('/api/tracks/:id/audio', { responseType: 'blob' })
+                 └─② authInterceptor (+ Bearer)
+                       ═══ GET ═══►  ③ auth : jwt.verify
+                                     ④ Track.findOne({ _id: id, ownerId: req.auth.sub })
+                                        absent OU pas au propriétaire ─► 404 « Piste inconnue »
+                                     ⑤ res.type(mimeType) ; res.sendFile(chemin)
+                                        ─► lecture du disque PAR MORCEAUX (flux)
+                       ◄══ 200 audio/mpeg, envoyé en plusieurs paquets ══
+           ⑥ HttpClient ACCUMULE tous les paquets, puis émet UN SEUL next(blob)
+     ⑦ révoque l'ancienne URL ─► URL.createObjectURL(blob) = "blob:http://localhost:4200/…"
+     ⑧ audioUrl.set(url), currentTrack.set(track) ─► <audio [src]> lit le Blob en mémoire
+        (aucune nouvelle requête réseau)
+```
+
+### Pourquoi `<audio src="/api/tracks/:id/audio">` ne reçoit pas le JWT
+
+L'intercepteur Angular n'agit que sur les requêtes faites par `HttpClient`. Avec un attribut `src`, c'est le **navigateur lui-même** qui télécharge le fichier, sans passer par Angular. De lui-même, le navigateur n'ajoute jamais d'en-tête `Authorization` : il n'envoie que les cookies du site. Le middleware `auth` (`app.js:56-76`) répondrait donc `401 « Authentification requise »`.
+
+On passe donc par `HttpClient` pour obtenir le fichier en `Blob`, puis on donne au lecteur une URL **locale** qui pointe vers ce `Blob` déjà téléchargé.
+
+### Contrôles du backend
+
+| Contrôle | Emplacement |
+|---|---|
+| Nom du champ fichier : `audio` | `app.js:337` `upload.single("audio")` |
+| Fichier absent → `400 « Fichier audio requis »` | `app.js:340-343` |
+| `title`, avec repli sur le nom original | `app.js:347`, `trim` + `required` dans `Track.js` |
+| Types MIME acceptés (MP3, WAV, OGG, M4A) | `allowed` `app.js:34-41`, `fileFilter` `app.js:109-119` |
+| 25 Mo maximum | `MAX_FILE_SIZE` `app.js:31`, `limits.fileSize` `app.js:108` |
+| Erreurs Multer et de format → `400 { message }` | gestionnaire central `app.js:444-451` |
+| Lecture réservée au propriétaire → `404` | `app.js:381-389` |
+
+Le `FormData` du frontend utilise exactement `audio` et `title` : il est conforme et n'a pas été modifié.
+
+**Pourquoi un `404` et pas un `403` pour la piste d'un autre utilisateur ?** Avec un `403`, le serveur confirmerait que l'identifiant existe. Avec un `404`, un utilisateur ne peut pas savoir si une piste existe chez quelqu'un d'autre.
+
+## TP2 Mission 3 — Upload, cards et lecture
+
+### Existant vérifié avant modification
+
+- L'upload marchait, mais **sans aucun retour visible** : pas d'état « envoi en cours », double soumission possible, erreurs seulement dans la console, pas de message de succès.
+- `accept="audio/*"` était plus large que ce qu'accepte le backend. Aucune vérification de taille.
+- Après l'envoi, `file` était remis à `undefined` mais **le champ natif affichait encore le nom du fichier**.
+- Les pistes s'affichaient en lignes, avec `{{ track.size }} Ko` alors que `size` est en **octets**.
+- La lecture marchait (Blob, ObjectURL, révocation de l'ancienne URL et de la dernière), mais sans indiquer le morceau en cours et sans afficher les erreurs.
+
+### Fichiers modifiés
+
+| Fichier | Nature du changement |
+|---|---|
+| `tracks-page.ts` | `ALLOWED_TYPES` / `MAX_SIZE` copiés du backend, validation dans `choose()`, signals `file`, `uploading`, `uploadError`, `uploadSuccess`, `currentTrack`, `audioLoading`, `audioError`, méthodes `clearFile()`, `serverMessage()`, `audioFailed()`, `formatOf()`, `formatSize()` |
+| `tracks-page.html` | Messages `role="alert"` / `role="status"`, bouton « Envoi… », cards `<ul>`/`<li>` avec `<h3>` et `<dl>`, lecteur avec « En cours : titre » et `(error)` |
+| `tracks-page.css` | Grille `repeat(auto-fill, minmax(190px, 1fr))`, card active, `focus-visible` |
+
+### Ajouts et modifications
+
+- **Validation dans `choose()`**, dans cet ordre :
+  1. type vide ;
+  2. type absent de `ALLOWED_TYPES` ;
+  3. taille supérieure à 25 Mo.
+
+  Si l'un de ces contrôles échoue : message précis et champ vidé (`rejectFile()`).
+- **`upload()`** :
+  - garde `if (!file || uploading()) return` contre la double soumission ;
+  - titre nettoyé (`trim`), avec repli sur le nom du fichier ;
+  - en cas de succès : message, `clearFile()`, retour en page 1 ;
+  - en cas d'erreur : `serverMessage()`.
+- **`clearFile()`** vide le signal **et** `fileInput().nativeElement.value`. Le signal seul ne suffit pas, car le navigateur garde le nom du fichier dans le champ natif.
+- **`serverMessage()`** : statut `0` → « Serveur injoignable » ; sinon `error.error.message` s'il existe ; sinon un message de secours.
+- **`play()`** :
+  - garde `audioLoading` contre les doubles clics ;
+  - `takeUntilDestroyed(destroyRef)` : si on quitte la page pendant le téléchargement, la réponse est ignorée et aucune `ObjectURL` orpheline n'est créée ;
+  - en cas d'erreur, message construit à partir du **statut**. Avec `responseType: 'blob'`, le corps d'erreur est lui aussi un `Blob` : `error.error.message` n'existe pas.
+- **`audioFailed()`** est appelée par `(error)` sur `<audio>` quand le navigateur n'arrive pas à décoder le fichier.
+- **Cards** :
+  - liste sémantique, titre en `<h3>`, `<dl>` format / taille / date (`<time datetime>` + pipe `date`) ;
+  - bouton avec `aria-label` ;
+  - card active mise en évidence avec `[class.active]` ;
+  - une seule colonne sur mobile.
+
+### Cas d'erreur pris en charge
+
+| Cas | Où c'est détecté | Ce que voit l'utilisateur |
+|---|---|---|
+| Fichier sans type MIME | `choose()`, aucune requête | « Type de fichier non reconnu par votre navigateur… » |
+| Format non accepté | `choose()`, aucune requête | « Format non accepté (type). Formats acceptés : MP3, WAV, OGG, M4A. » |
+| Fichier de plus de 25 Mo | `choose()`, aucune requête | « Fichier trop volumineux (taille). Taille maximale : 25 Mo. » |
+| Double clic sur « Envoyer » | Signal `uploading` | Bouton grisé « Envoi… » |
+| Titre vide ou fait d'espaces | `upload()` | Le nom du fichier sert de titre |
+| Refus du serveur (`400`) | Backend (Multer, `fileFilter`, Mongoose) | Message renvoyé par le serveur |
+| Backend éteint (statut 0) | `serverMessage()` | « Serveur injoignable. Vérifiez que le backend est lancé. » |
+| Token expiré (`401`) | `authInterceptor` | Retour à `/login` |
+| Piste introuvable ou appartenant à un autre compte (`404`) | `play()` | « « titre » est introuvable ou ne vous appartient pas. » |
+| Fichier non décodable | `(error)` sur `<audio>` | « Ce fichier audio ne peut pas être lu par votre navigateur. » |
+| Départ de la page pendant un téléchargement | `takeUntilDestroyed` | Rien : aucune `ObjectURL` n'est créée |
+
+### Validation frontend et validation backend
+
+| | Frontend (`choose()`) | Backend (Multer) |
+|---|---|---|
+| Rôle | Confort : message immédiat, pas d'envoi inutile de plusieurs Mo | Sécurité : seule barrière fiable |
+| Contournable ? | Oui : DevTools, `curl`, Postman, script | Non, pour qui n'a pas accès au serveur |
+| Règles | **Les mêmes** que le backend (copiées de `allowed` et `MAX_FILE_SIZE`) | `allowed`, `limits.fileSize` |
+
+Si les règles diffèrent, le frontend laisse passer des fichiers que le serveur refusera, ou bloque des fichiers que le serveur aurait acceptés. C'est pour cela que l'acceptation d'après l'extension a été rejetée (voir « TP2 — Corrections après relecture »).
+
+**Limite commune** : les deux côtés font confiance au type **annoncé** par le client, qui est déduit de l'extension. Un `.txt` renommé en `.mp3` passe les deux validations, et seul `<audio>` le détecte au moment de la lecture (`audioFailed()`). C'est la critique n°2 de la première partie de ce document. La corriger demanderait de lire les premiers octets du fichier côté serveur.
+
+### Vérification
+
+- `npm run build` passe sans erreur.
+- **Network** :
+  - `POST /api/tracks` en `multipart/form-data` avec `audio` et `title` ;
+  - `GET /api/tracks/:id/audio` en `200 audio/mpeg`, avec `Authorization: Bearer …` ;
+  - un `.txt` choisi dans Angular n'envoie aucune requête ;
+  - un `.txt` envoyé depuis la console avec `fetch` reçoit `400 « Format audio non accepté »` ;
+  - avec un second compte, la piste du premier renvoie `404`.
+
+### Limite connue
+
+La lecture ne commence qu'une fois **tout** le fichier téléchargé (voir la section suivante). Pas de barre de progression pour l'upload, pas de suppression, pas de filtre : ces améliorations sont facultatives dans le sujet.
+
+## TP2 — Corrections après relecture
+
+| # | Défaut | Correction (`tracks-page.ts`) |
+|---|---|---|
+| 1 | Un titre `"   "` devenait vide après le `trim` de Mongoose → `400` avec un message technique | `this.title.value.trim() \|\| file.name` |
+| 2 | Un fichier sans type affichait « Format non accepté (inconnu) » | Cas traité à part dans `choose()`, avec un message explicite |
+| 3 | Une page devenue vide après des suppressions restait affichée, avec « Suivant » grisé | `load()` passe sur la dernière page existante et recharge |
+
+**Proposition rejetée** : accepter un fichier sans type d'après son extension. Un fichier sans type est envoyé avec `Content-Type: application/octet-stream`. Multer met cette valeur dans `file.mimetype` et `fileFilter` la refuse. Le fichier aurait donc été accepté par Angular puis refusé par le serveur.
+
+## TP2 — Blob, ObjectURL, mémoire, buffering et streaming
+
+### Pourquoi `Blob` + `ObjectURL`
+
+1. La route audio est protégée par JWT, et seul `HttpClient` passe par l'intercepteur qui ajoute `Authorization`.
+2. On télécharge donc le fichier en `Blob`, c'est-à-dire des octets bruts gardés en mémoire par le navigateur.
+3. `<audio>` ne sait pas lire un objet JavaScript, il a besoin d'une URL. `URL.createObjectURL(blob)` en crée une, locale (`blob:http://localhost:4200/<uuid>`), qui pointe vers ce `Blob`.
+4. Le lecteur lit cette URL **sans nouvelle requête réseau**.
+
+**Coût de ce choix** : la lecture attend la fin du téléchargement, et le fichier entier est en mémoire. C'est acceptable ici : un seul morceau à la fois, 25 Mo maximum.
+
+### Cycle de vie d'une `ObjectURL`
+
+```text
+ play(A) ─► createObjectURL(blobA) = urlA          mémoire : blobA
+ play(B) ─► revokeObjectURL(urlA)                  blobA peut être libéré
+         ─► createObjectURL(blobB) = urlB          mémoire : blobB
+ quitter /tracks ─► onDestroy : revokeObjectURL(urlB)   mémoire : rien
+```
+
+Sans révocation, chaque morceau écouté resterait en mémoire jusqu'à la fermeture de l'onglet. Une application Angular ne recharge jamais le document en changeant de page, donc la mémoire ne serait jamais libérée.
+
+### Réponses aux questions du sujet
+
+**1. Le backend envoie-t-il le fichier entier en mémoire ou progressivement depuis le disque ?**
+Progressivement. `res.sendFile(audioPath)` (`app.js:394`) ouvre un flux de lecture sur le fichier et l'envoie par morceaux. Le serveur ne charge jamais le fichier entier en mémoire. `sendFile` gère aussi les requêtes `Range` (`Accept-Ranges: bytes`, réponse `206 Partial Content`). Ici, `HttpClient` n'en envoie pas : il demande le fichier entier et reçoit un `200`.
+
+**2. Avec `HttpClient` et `responseType: "blob"`, quand le composant reçoit-il le fichier ?**
+Une seule fois, **à la fin du téléchargement complet**. `HttpClient` accumule les paquets reçus et n'émet `next(blob)` qu'une fois la réponse terminée. Pendant ce temps, le composant affiche « Téléchargement du morceau… ».
+
+**3. Avec 100 morceaux, les 100 fichiers sont-ils chargés en mémoire dès l'affichage de la liste ?**
+Non :
+- `load()` → `list()` ne renvoie que des **métadonnées JSON**, et seulement 5 par page (`limit`) ;
+- `audio()` n'est appelé que dans `play()`, donc uniquement au clic sur « Lire » ;
+- `play()` révoque l'URL précédente : il y a **au plus un** `Blob` audio en mémoire.
+
+**4. Différence avec 100 éléments `<audio>` utilisant directement une URL HTTP ?**
+- **Avantage** : le navigateur ferait du *buffering*. Il commence à jouer après quelques secondes de données, télécharge la suite pendant la lecture et se déplace dans le morceau grâce aux requêtes `Range`.
+- **Inconvénient** : selon `preload`, il pourrait lancer jusqu'à 100 requêtes dès l'affichage, pour les métadonnées ou le début de chaque fichier.
+- **Blocage ici** : ces requêtes ne passent pas par `HttpClient`, donc pas de JWT et **`401` partout**. Il faudrait mettre le token dans l'URL (il apparaîtrait dans les logs et l'historique) ou passer à un cookie, ce qui change le contrat d'API.
+
+**5. Pourquoi révoquer l'URL créée par `URL.createObjectURL` ?**
+Tant qu'elle existe, le navigateur garde une référence vers le `Blob`, qui ne peut pas être libéré par le ramasse-miettes. Elle n'est supprimée automatiquement qu'à la fermeture du document, ce qui n'arrive jamais quand on navigue dans une application Angular. Voir le cycle de vie ci-dessus.
+
+### Les trois notions
+
+| Notion | Où | Ce qui se passe | Dans ce projet ? |
+|---|---|---|---|
+| **Streaming côté serveur** | Express, `res.sendFile` | Le serveur lit le disque et envoie par morceaux, sans tout mettre en mémoire | Oui |
+| **Téléchargement complet d'un `Blob`** | Angular, `responseType: 'blob'` | Le client attend tous les octets avant de les donner au composant | Oui |
+| **Buffering du navigateur** | `<audio src="http://…">` | Le lecteur télécharge un peu d'avance, joue pendant le téléchargement et utilise `Range` pour se déplacer | Non, à cause du JWT |

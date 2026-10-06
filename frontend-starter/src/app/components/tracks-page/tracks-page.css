@@ -1,1 +1,43 @@
 :host { display: block; }
+
+.hint { display: block; margin-bottom: 0.8rem; color: #61756f; }
+
+button:focus-visible { outline: 3px solid #123d32; outline-offset: 2px; }
+
+.track-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.track-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 2px solid #e1ebe7;
+  border-radius: 12px;
+}
+
+.track-card.active { border-color: #1d755e; background: #eef6f2; }
+
+.track-card h3 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+
+.original { margin: 0; color: #61756f; font-size: 0.85rem; overflow-wrap: anywhere; }
+
+.track-card dl { display: grid; gap: 0.2rem; margin: 0 0 0.4rem; font-size: 0.85rem; }
+
+.track-card dl div { display: flex; justify-content: space-between; gap: 0.5rem; }
+
+.track-card dt { color: #61756f; }
+
+.track-card dd { margin: 0; }
+
+.track-card button { margin-top: auto; }
+
+.empty { color: #61756f; }
+
+.player p { margin-bottom: 0.4rem; }

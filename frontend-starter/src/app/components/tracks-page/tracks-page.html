@@ -9,36 +9,85 @@
     <article class="card">
       <h2>Importer</h2>
       <label>Titre<input [formControl]="title" /></label>
-      <label>Fichier audio<input type="file" accept="audio/*" (change)="choose($event)" /></label>
-      <button type="button" (click)="upload()" [disabled]="!file">Envoyer</button>
+      <label>
+        Fichier audio
+        <input #fileInput type="file" accept=".mp3,.wav,.ogg,.m4a" (change)="choose($event)" />
+      </label>
+      <small class="hint">MP3, WAV, OGG ou M4A, 25 Mo maximum.</small>
+      @if (uploadError()) {
+        <p class="error" role="alert">{{ uploadError() }}</p>
+      }
+      @if (uploadSuccess()) {
+        <p class="success" role="status">{{ uploadSuccess() }}</p>
+      }
+      <button type="button" (click)="upload()" [disabled]="!file() || uploading()">
+        {{ uploading() ? 'Envoi…' : 'Envoyer' }}
+      </button>
     </article>
 
     <article class="card">
       <div class="row">
         <h2>Mes pistes</h2>
-        <button type="button" (click)="load()">Actualiser</button>
+        <button type="button" (click)="load()" [disabled]="loading()">Actualiser</button>
       </div>
-      @if (loading()) {
-        <p>Chargement…</p>
+      @if (error()) {
+        <p role="alert">{{ error() }}</p>
       }
-      @for (track of tracks(); track track.id) {
-        <div class="track">
-          <div>
-            <b>{{ track.title }}</b>
-            <small>{{ track.originalName }} · {{ track.size }} Ko</small>
-          </div>
-          <button type="button" (click)="play(track)" [attr.aria-label]="'Lire ' + track.title">▶</button>
-        </div>
-      } @empty {
-        <p>Aucune piste.</p>
+      @if (loading()) {
+        <p role="status">Chargement…</p>
+      } @else {
+        <ul class="track-list">
+          @for (track of tracks(); track track.id) {
+            <li class="track-card" [class.active]="currentTrack()?.id === track.id">
+              <h3>{{ track.title }}</h3>
+              <p class="original">{{ track.originalName }}</p>
+              <dl>
+                <div><dt>Format</dt><dd>{{ formatOf(track.mimeType) }}</dd></div>
+                <div><dt>Taille</dt><dd>{{ formatSize(track.size) }}</dd></div>
+                <div>
+                  <dt>Ajouté le</dt>
+                  <dd><time [attr.datetime]="track.createdAt">{{ track.createdAt | date: 'dd/MM/yyyy' }}</time></dd>
+                </div>
+              </dl>
+              <button
+                type="button"
+                (click)="play(track)"
+                [disabled]="audioLoading()"
+                [attr.aria-label]="'Lire ' + track.title"
+              >
+                ▶ Lire
+              </button>
+            </li>
+          } @empty {
+            @if (!error()) {
+              <li class="empty">Aucune piste.</li>
+            }
+          }
+        </ul>
       }
       <div class="pager">
-        <button type="button" (click)="go(page() - 1)" [disabled]="page() === 1">Préc.</button>
+        <button type="button" (click)="go(page() - 1)" [disabled]="loading() || page() <= 1">Précédent</button>
         <span>Page {{ page() }} / {{ pages() }}</span>
-        <button type="button" (click)="go(page() + 1)" [disabled]="page() === pages()">Suiv.</button>
+        <button type="button" (click)="go(page() + 1)" [disabled]="loading() || page() >= pages()">Suivant</button>
       </div>
+
+      @if (audioLoading()) {
+        <p role="status">Téléchargement du morceau…</p>
+      }
+      @if (audioError()) {
+        <p class="error" role="alert">{{ audioError() }}</p>
+      }
       @if (audioUrl()) {
-        <audio [src]="audioUrl()" controls autoplay></audio>
+        <div class="player">
+          <p>En cours : <b>{{ currentTrack()?.title }}</b></p>
+          <audio
+            [src]="audioUrl()"
+            controls
+            autoplay
+            (error)="audioFailed()"
+            [attr.aria-label]="'Lecteur : ' + currentTrack()?.title"
+          ></audio>
+        </div>
       }
     </article>
   </div>

@@ -5,14 +5,16 @@ import { catchError, throwError } from 'rxjs';
 import { AuthService } from '../services/auth.service';
 
 /**
- * Adds the bearer token to protected API requests and ends the session
- * when the API rejects it (invalid or expired token).
+ * Intercepteur exécuté sur chaque requête HTTP :
+ * - à l'aller : ajout du token JWT dans le header Authorization ;
+ * - au retour : fin de session si l'API refuse le token (invalide ou expiré).
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const auth = inject(AuthService);
   const router = inject(Router);
   const token = auth.token();
 
+  // Requête copiée avec le header "Bearer <token>" si un token existe, sinon envoyée telle quelle.
   return next(
     token
       ? request.clone({
@@ -20,6 +22,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         })
       : request,
   ).pipe(
+    // Inspection des réponses en erreur.
     catchError((error: unknown) => {
       if (isSessionRejected(error, request.url) && token && auth.token() === token) {
         // Seul le premier 401 d'une session passe ici : logout() vide le token,
@@ -27,6 +30,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         // arrivés après une reconnexion ne déclenchent ni nettoyage ni redirection.
         console.warn('[AuthInterceptor] Token refusé par l’API, retour à la connexion');
         auth.logout();
+        // Redirection vers /login, sauf si la page est déjà affichée.
         if (!router.url.startsWith('/login')) {
           void router.navigateByUrl('/login');
         }
