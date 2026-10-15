@@ -15,12 +15,19 @@ export class TrackService {
     });
   }
 
-  /** POST /api/tracks : envoi multipart avec les champs attendus par le backend. */
+  /**
+   * POST /api/tracks : envoi multipart avec les champs attendus par le backend.
+   * observe: 'events' + reportProgress : l'Observable émet chaque étape (Sent, UploadProgress…)
+   * et pas seulement la réponse finale, ce qui permet d'afficher la progression.
+   */
   upload(file: File, title: string) {
     const body = new FormData();
     body.append('audio', file);
     body.append('title', title);
-    return this.http.post<Track>('/api/tracks', body);
+    return this.http.post<Track>('/api/tracks', body, {
+      reportProgress: true,
+      observe: 'events',
+    });
   }
 
   /**
@@ -31,5 +38,13 @@ export class TrackService {
     return this.http.get(`/api/tracks/${id}/audio`, {
       responseType: 'blob',
     });
+  }
+
+  /**
+   * DELETE /api/tracks/:id : réponse 204 sans corps.
+   * Le backend ne supprime que si la piste appartient à l'utilisateur du JWT (sinon 404).
+   */
+  deleteTrack(id: string) {
+    return this.http.delete<void>(`/api/tracks/${id}`);
   }
 }

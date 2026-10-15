@@ -1,20 +1,39 @@
-<header>
-  <div>
-    <b>Guitar Practice Cloud</b>
-    <small>Le cloud qui manque à votre ampli</small>
-  </div>
-  <nav aria-label="Navigation principale">
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" routerLink="/tracks">
+      <span class="logo material-symbols-outlined" aria-hidden="true">graphic_eq</span>
+      <span>
+        <b>Guitar Practice Cloud</b>
+        <small>Le cloud qui manque à votre ampli</small>
+      </span>
+    </a>
+    <nav aria-label="Navigation principale">
+      @if (auth.token()) {
+        <a routerLink="/tracks" routerLinkActive="active">
+          <span class="material-symbols-outlined" aria-hidden="true">library_music</span>
+          <span>Backing tracks</span>
+        </a>
+        <a routerLink="/profile" routerLinkActive="active">
+          <span class="material-symbols-outlined" aria-hidden="true">person</span>
+          <span>Profil</span>
+        </a>
+      } @else {
+        <a routerLink="/login" routerLinkActive="active">
+          <span class="material-symbols-outlined" aria-hidden="true">login</span>
+          <span>Connexion</span>
+        </a>
+        <a routerLink="/register" routerLinkActive="active">
+          <span class="material-symbols-outlined" aria-hidden="true">person_add</span>
+          <span>Inscription</span>
+        </a>
+      }
+    </nav>
     @if (auth.token()) {
-      <a routerLink="/tracks">Backing tracks</a>
-      <a routerLink="/profile">Profil</a>
       <button type="button" class="logout" (click)="logout()">Déconnexion</button>
-    } @else {
-      <a routerLink="/login">Connexion</a>
-      <a routerLink="/register">Inscription</a>
     }
-  </nav>
-</header>
+  </aside>
 
-<main>
-  <router-outlet />
-</main>
+  <main>
+    <router-outlet />
+  </main>
+</div>
