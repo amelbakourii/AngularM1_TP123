@@ -1,6 +1,12 @@
-# Analyse du backend — Guitar Practice Cloud API
+# Analyse du projet — Guitar Practice Cloud
 
-Ce document décrit l'architecture, les workflows, les technologies et les mécanismes clés (authentification, upload de fichiers, accès base de données) du backend situé dans `backend/`.
+Ce document regroupe les analyses produites avec l'assistant IA au fil des TP :
+
+- **TP1 — Mission 0** : analyse du backend situé dans `backend/` (architecture, workflows, technologies, authentification, upload de fichiers, accès base de données), puis dix critiques classées par priorité ;
+- **TP1 — Mission 1** : inscription, connexion, profil, déconnexion, gestion des `401` et schéma annoté du flux de connexion ;
+- **TP2** : bibliothèque paginée, upload, cards et lecture audio.
+
+# TP1 — Mission 0 : analyse du backend
 
 ## 1. Vue d'ensemble
 
@@ -337,7 +343,7 @@ Les points ci-dessous sont classés du plus critique au moins critique, avec un 
 
 ---
 
-# Mission 1 TD 1
+# TP1 — Mission 1
 
 ## Formulaires de connexion et d'inscription (frontend Angular)
 
@@ -535,7 +541,9 @@ Le template `login-page.html` n'a pas changé : il contenait déjà les messages
 
 ### Ajouts et modifications
 
-#### 1. Gestion globale du 401 (`auth.interceptor.ts`)
+#### 1. Premier traitement du 401 (`auth.interceptor.ts`)
+
+> Version initiale, écrite pendant cette partie. Elle a ensuite été améliorée (un seul traitement pour plusieurs `401`, `401` d'un ancien token ignoré, pas de redirection depuis `/login`) : voir « Mission 1 — Gestion globale des réponses 401 » plus bas, qui décrit le code actuel.
 
 ```diff
  export const authInterceptor: HttpInterceptorFn = (request, next) => {
@@ -570,11 +578,13 @@ Le template `login-page.html` n'a pas changé : il contenait déjà les messages
 - **L'erreur est relancée** (`throwError`) : le composant qui a fait l'appel la reçoit quand même, termine son `finalize()` (pour remettre `loading` à `false`) et peut afficher un message.
 - **Aucun token logué** : le `console.warn` ne contient aucune donnée sensible.
 
+#### 2. Chargement du profil (`profile-page.ts`)
 
 - Le profil est chargé **dès l'arrivée sur `/profile`**. Le bouton sert maintenant à le **recharger**.
 - `load()` appelle `AuthService.profile()`, qui envoie `GET /api/users/me`. Le JWT est ajouté par l'intercepteur et `currentUser` est mis à jour par le `tap()` du service.
 - Le champ est prérempli avec `form.reset({ name })` plutôt que `setValue`, pour remettre à zéro les états `touched`/`dirty` et éviter un message d'erreur au chargement.
 
+#### 3. Modification du nom (`profile-page.ts` et `profile-page.html`)
 
 - **Validateur `trimmedMinLength(2)`** : il reprend la règle du modèle Mongoose (`trim` + `minlength: 2`). `Validators.minLength(2)` ne suffisait pas, car il accepterait `"  "`, que l'API refuserait ensuite.
 - Le nom est **nettoyé (`trim`) avant l'envoi**.
